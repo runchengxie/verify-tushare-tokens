@@ -1,0 +1,30 @@
+# Copy to .envrc and allow direnv to load local secrets.
+# Requires https://direnv.net and `direnv allow` in this directory.
+
+# Load environment variables from .env files if they exist
+dotenv_if_exists .env
+dotenv_if_exists .env.local
+
+# Re-run this script when dependency manifests change
+watch_file pyproject.toml
+watch_file uv.lock
+
+# Ensure uv and the venv exist
+if ! command -v uv >/dev/null 2>&1; then
+  echo "warning: uv 未安装。请先安装：curl -LsSf https://astral.sh/uv/install.sh | sh" >&2
+fi
+
+# Create venv if missing (seed pip so some tools behave)
+if [ ! -d .venv ]; then
+  uv venv --seed || exit 1
+fi
+
+# Activate the venv
+source .venv/bin/activate
+
+# Sync dependencies. Use --frozen when a lockfile exists.
+if [ -f uv.lock ]; then
+  uv sync --frozen --extra dev
+else
+  uv sync --extra dev
+fi
