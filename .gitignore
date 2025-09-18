@@ -1,0 +1,15 @@
+# Debugging purpose
+full_project_source.txt
+
+# Virtual Environment
+.venv/
+
+# Environment
+.env
+.envrc
+
+# Python related
+__pycache__/
+
+# IDE related
+.vscode/
