@@ -2,7 +2,7 @@
 
 这个小工具用于通过 TuShare 的用户配额接口验证本地环境中的 Token 是否有效，并打印即将到期的积分（如有）。
 
-> 脚本文件名在文档中以 `project_tools/script.py` 占位，请替换成你的真实文件名。
+> 脚本文件名在文档中以 `project_tools/verify_tushare_tokens.py` 为默认位置，你可以放置在其他位置，只要能正常读取到环境变量即可运行。
 
 ## 功能概览
 
