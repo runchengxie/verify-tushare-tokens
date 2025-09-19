@@ -83,6 +83,7 @@ EXCLUDE_FILES: Set[str] = {
     "Thumbs.db",
     "celerybeat-schedule",
     ".env",
+    "uv.lock",
 }
 
 
