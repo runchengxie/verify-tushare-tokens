@@ -13,31 +13,14 @@ watch_file requirements-dev.txt
 
 has_cmd() { command -v "$1" >/dev/null 2>&1; }
 
-# Check if the 'dev' optional dependency group exists in pyproject.toml
-has_dev_extra() {
-  [ -f pyproject.toml ] || { echo 0; return; }
-  python3 - <<'PY' 2>/dev/null
-try:
-    import pathlib
-    p = pathlib.Path("pyproject.toml")
-    text = p.read_text(encoding="utf-8")
-    try:
-        import tomllib as tomli
-    except Exception:
-        import tomli as tomli  # This will raise an exception on Python < 3.11 if tomli is not installed
-    data = tomli.loads(text)
-    od = data.get("project", {}).get("optional-dependencies", {})
-    print(1 if "dev" in od else 0)
-except Exception:
-    print(0)
-PY
-}
+# Backwards compatibility: map legacy NO_DEV to UV_NO_DEV
+if [ -n "$NO_DEV" ] && [ -z "$UV_NO_DEV" ]; then
+  export UV_NO_DEV=1
+fi
 
-DEV_EXTRA="$(has_dev_extra)"
-USE_DEV=""
-[ "$DEV_EXTRA" = "1" ] && USE_DEV="--extra dev"
-# Allow disabling dev dependencies by setting NO_DEV=1
-[ -n "$NO_DEV" ] && USE_DEV=""
+SYNC_ARGS=()
+[ -f uv.lock ] && SYNC_ARGS+=(--frozen)
+[ -n "$UV_NO_DEV" ] && SYNC_ARGS+=(--no-dev)
 
 # Ensure the virtual environment exists
 ensure_venv_uv() {
@@ -60,10 +43,8 @@ ensure_venv_py() {
 if has_cmd uv; then
   # Prefer using uv if available
   if ensure_venv_uv; then
-    if [ -f uv.lock ]; then
-      uv sync --frozen $USE_DEV || echo "warning: uv sync failed, the environment might be incomplete" >&2
-    else
-      uv sync $USE_DEV || echo "warning: uv sync failed, the environment might be incomplete" >&2
+    if ! uv sync "${SYNC_ARGS[@]}"; then
+      echo "warning: uv sync failed, the environment might be incomplete" >&2
     fi
   else
     echo "notice: uv venv failed, falling back to python venv + pip" >&2
@@ -73,15 +54,11 @@ else
   echo "notice: uv not detected, using the python venv + pip method" >&2
   ensure_venv_py
   # Installation strategy when using pip
-  if [ -f requirements-dev.txt ] && [ -z "$NO_DEV" ]; then
+  if [ -f requirements-dev.txt ] && [ -z "$UV_NO_DEV" ] && [ -z "$NO_DEV" ]; then
     pip install -r requirements-dev.txt || echo "warning: failed to install requirements-dev.txt" >&2
   elif [ -f requirements.txt ]; then
     pip install -r requirements.txt || echo "warning: failed to install requirements.txt" >&2
   elif [ -f pyproject.toml ]; then
-    if [ -z "$NO_DEV" ] && [ "$DEV_EXTRA" = "1" ]; then
-      pip install -e ".[dev]" || echo 'warning: failed to install ".[dev]" with pip' >&2
-    else
-      pip install -e . || echo 'warning: failed to install "." with pip' >&2
-    fi
+    pip install -e . || echo 'warning: failed to install "." with pip' >&2
   fi
 fi
