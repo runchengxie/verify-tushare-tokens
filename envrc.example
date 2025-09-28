@@ -1,6 +1,14 @@
 # Copy to .envrc and allow direnv to load local secrets.
 # Requires direnv: https://direnv.net
 
+# If a virtual environment from another project is active in the current shell, deactivate it first.
+if [ -n "$VIRTUAL_ENV" ] && [ "$VIRTUAL_ENV" != "$PWD/.venv" ]; then
+  # Safely try to run the deactivate command if it exists.
+  command -v deactivate >/dev/null 2>&1 && deactivate || true
+  # As a fallback, unset the VIRTUAL_ENV variable to ensure the shell is clean.
+  unset VIRTUAL_ENV
+fi
+
 # Load environment variables from .env files if they exist
 dotenv_if_exists .env
 dotenv_if_exists .env.local
