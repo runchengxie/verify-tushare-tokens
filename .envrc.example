@@ -27,6 +27,8 @@ if [ -n "$NO_DEV" ] && [ -z "$UV_NO_DEV" ]; then
 fi
 
 SYNC_ARGS=()
+# Default to installing all extras; set UV_NO_ALL_EXTRAS=1 to disable (e.g. `export UV_NO_ALL_EXTRAS=1`)
+[ -z "$UV_NO_ALL_EXTRAS" ] && SYNC_ARGS+=(--all-extras)
 [ -f uv.lock ] && SYNC_ARGS+=(--frozen)
 [ -n "$UV_NO_DEV" ] && SYNC_ARGS+=(--no-dev)
 
