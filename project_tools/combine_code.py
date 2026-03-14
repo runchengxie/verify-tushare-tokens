@@ -1,3 +1,9 @@
+"""Internal maintainer helper for exporting repository source into one text file.
+
+This script is not part of the public `csml` workflow. Keep it as a local
+maintenance utility.
+"""
+
 import argparse
 import json
 import logging
@@ -6,9 +12,15 @@ from pathlib import Path
 from typing import List, Optional, Set
 
 # --- CONFIGURATION ---
+def _find_project_root(start: Path) -> Path:
+    for parent in [start, *start.parents]:
+        if (parent / "pyproject.toml").exists():
+            return parent
+    return start
+
+
 try:
-    # Assumes the script is in a 'tools' folder inside the project root
-    PROJECT_ROOT = Path(__file__).resolve().parent.parent
+    PROJECT_ROOT = _find_project_root(Path(__file__).resolve())
 except NameError:
     # Fallback for interactive environments where __file__ is not defined
     PROJECT_ROOT = Path.cwd()
@@ -39,9 +51,15 @@ EXCLUDE_DIRS_ANYWHERE: Set[str] = {
 # This allows keeping nested directories with the same name (e.g., 'src/app/data').
 EXCLUDE_DIRS_ROOT_ONLY: Set[str] = {
     "data",  # User-specific data, not source code
-    "project_tools",
 #     "tests",
-    ".ruff_cache",    
+    ".ruff_cache",
+    "out",
+    "cache",
+    ".venv",
+    "venv",
+    ".git/",
+    "__pycache__/",
+    "artifacts",
 }
 
 # Directory name patterns to exclude (e.g., any directory ending with .egg-info).
@@ -141,6 +159,42 @@ def is_likely_text_file(filepath: Path) -> bool:
         return False
 
 
+def collect_file_tree(
+    project_root: Path,
+    exclude_files: Set[str],
+) -> List[Path]:
+    """
+    Collects all file paths in the project, applying the same exclusion rules
+    as the main combine function.
+    """
+    files: List[Path] = []
+
+    for dirpath, dirnames, filenames in os.walk(project_root, topdown=True):
+        current_path = Path(dirpath)
+
+        original_dirs = list(dirnames)
+        dirnames.clear()
+
+        for d in original_dirs:
+            if d in EXCLUDE_DIRS_ANYWHERE:
+                continue
+            if d in EXCLUDE_DIRS_ROOT_ONLY and current_path == project_root:
+                continue
+            if any(d.endswith(p) for p in EXCLUDE_DIR_PATTERNS):
+                continue
+            dirnames.append(d)
+
+        dirnames.sort()
+
+        for filename in sorted(filenames):
+            if filename in exclude_files:
+                continue
+            filepath = current_path / filename
+            files.append(filepath)
+
+    return files
+
+
 def combine_project_files(  # noqa: C901 - high complexity due to multiple nested checks
     project_root: Path = PROJECT_ROOT,
     output_filename: str = OUTPUT_FILENAME,
@@ -158,6 +212,18 @@ def combine_project_files(  # noqa: C901 - high complexity due to multiple neste
     exclude_files = set(EXCLUDE_FILES)
     exclude_files.add(output_filename)
 
+    # First, collect the file tree for the header
+    logging.info("Collecting file tree structure...")
+    all_files = collect_file_tree(project_root, exclude_files)
+
+    # Convert to relative paths and sort
+    file_tree_lines = [
+        f.relative_to(project_root).as_posix() for f in all_files
+    ]
+    file_tree_lines.sort()
+
+    logging.info("Found %d files to include in the archive.\n", len(file_tree_lines))
+
     try:
         with open(output_filepath, "w", encoding="utf-8", errors="replace") as outfile:
             outfile.write("--- Project Source Code Archive ---\n\n")
@@ -165,6 +231,13 @@ def combine_project_files(  # noqa: C901 - high complexity due to multiple neste
                 "This file contains the concatenated source code of the project, "
                 "with each file wrapped in tags indicating its relative path.\n\n"
             )
+
+            # Write file tree at the beginning
+            outfile.write("--- Full Project Source File List ---\n")
+            outfile.write(f"Total files: {len(file_tree_lines)}\n\n")
+            for line in file_tree_lines:
+                outfile.write(line + "\n")
+            outfile.write("\n--- End of File List ---\n\n")
 
             for dirpath, dirnames, filenames in os.walk(project_root, topdown=True):
                 current_path = Path(dirpath)
