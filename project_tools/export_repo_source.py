@@ -59,6 +59,7 @@ EXCLUDE_DIRS_ROOT_ONLY: Set[str] = {
     ".git/",
     "__pycache__/",
     "artifacts",
+    "configs",
 }
 
 # Directory name patterns to exclude (e.g., any directory ending with .egg-info).
@@ -158,6 +159,113 @@ def is_likely_text_file(filepath: Path) -> bool:
         return False
 
 
+def get_directory_exclude_reason(
+    dir_name: str,
+    current_path: Path,
+    project_root: Path,
+) -> Optional[str]:
+    """Returns the exclude reason for a directory, or None if it is included."""
+    if dir_name in EXCLUDE_DIRS_ANYWHERE:
+        return "excluded directory (anywhere)"
+    if dir_name in EXCLUDE_DIRS_ROOT_ONLY and current_path == project_root:
+        return "excluded root-only directory"
+    if any(dir_name.endswith(pattern) for pattern in EXCLUDE_DIR_PATTERNS):
+        return "excluded directory pattern"
+    return None
+
+
+def get_archive_file_status(
+    filepath: Path,
+    exclude_files: Set[str],
+) -> tuple[bool, str]:
+    """Classifies whether a file should be included in the content export."""
+    if filepath.name in exclude_files:
+        return False, "explicitly excluded filename"
+    if filepath.suffix.lower() == ".ipynb":
+        return True, "notebook"
+    if filepath.suffix.lower() in EXCLUDE_EXTENSIONS:
+        return False, "excluded extension"
+    if is_likely_text_file(filepath):
+        return True, "text file"
+    return False, "binary or unreadable file"
+
+
+def filter_walk_directories(
+    dirnames: List[str],
+    current_path: Path,
+    project_root: Path,
+) -> List[str]:
+    """Returns the directories that should remain traversable for os.walk."""
+    included_dirs: List[str] = []
+    for dirname in dirnames:
+        if get_directory_exclude_reason(dirname, current_path, project_root):
+            continue
+        included_dirs.append(dirname)
+    included_dirs.sort()
+    return included_dirs
+
+
+def collect_project_tree_lines(
+    project_root: Path,
+    exclude_files: Set[str],
+) -> tuple[List[str], dict[str, int]]:
+    """Builds a tree view of the repository with include/exclude markers.
+
+    Excluded directories are shown only at the first excluded node and their
+    children are intentionally not expanded.
+    """
+    stats = {
+        "included_files": 0,
+        "excluded_files": 0,
+        "excluded_directories": 0,
+    }
+
+    def _walk_tree(current_path: Path, prefix: str) -> List[str]:
+        try:
+            children = sorted(
+                current_path.iterdir(),
+                key=lambda path: (path.is_file(), path.name.lower()),
+            )
+        except OSError as exc:
+            return [f"{prefix}`-- [exclude] <unreadable> ({exc})"]
+
+        lines: List[str] = []
+        for index, child in enumerate(children):
+            is_last = index == len(children) - 1
+            connector = "`-- " if is_last else "|-- "
+            child_prefix = prefix + ("    " if is_last else "|   ")
+
+            if child.is_dir():
+                reason = get_directory_exclude_reason(
+                    child.name, current_path, project_root
+                )
+                if reason:
+                    stats["excluded_directories"] += 1
+                    lines.append(
+                        f"{prefix}{connector}[exclude] {child.name}/ "
+                        f"({reason}; subtree omitted)"
+                    )
+                    continue
+
+                lines.append(f"{prefix}{connector}[include] {child.name}/")
+                lines.extend(_walk_tree(child, child_prefix))
+                continue
+
+            include_in_archive, reason = get_archive_file_status(child, exclude_files)
+            if include_in_archive:
+                stats["included_files"] += 1
+                lines.append(f"{prefix}{connector}[include] {child.name}")
+            else:
+                stats["excluded_files"] += 1
+                lines.append(
+                    f"{prefix}{connector}[exclude] {child.name} ({reason})"
+                )
+
+        return lines
+
+    return ["[include] ./", *_walk_tree(project_root, "")], stats
+
+
 def collect_file_tree(
     project_root: Path,
     exclude_files: Set[str],
@@ -170,20 +278,9 @@ def collect_file_tree(
 
     for dirpath, dirnames, filenames in os.walk(project_root, topdown=True):
         current_path = Path(dirpath)
-
-        original_dirs = list(dirnames)
-        dirnames.clear()
-
-        for d in original_dirs:
-            if d in EXCLUDE_DIRS_ANYWHERE:
-                continue
-            if d in EXCLUDE_DIRS_ROOT_ONLY and current_path == project_root:
-                continue
-            if any(d.endswith(p) for p in EXCLUDE_DIR_PATTERNS):
-                continue
-            dirnames.append(d)
-
-        dirnames.sort()
+        dirnames[:] = filter_walk_directories(
+            list(dirnames), current_path, project_root
+        )
 
         for filename in sorted(filenames):
             if filename in exclude_files:
@@ -211,17 +308,14 @@ def combine_project_files(  # noqa: C901 - high complexity due to multiple neste
     exclude_files = set(EXCLUDE_FILES)
     exclude_files.add(output_filename)
 
-    # First, collect the file tree for the header
-    logging.info("Collecting file tree structure...")
-    all_files = collect_file_tree(project_root, exclude_files)
+    # First, collect the tree summary for the header.
+    logging.info("Collecting project tree structure...")
+    tree_lines, tree_stats = collect_project_tree_lines(project_root, exclude_files)
 
-    # Convert to relative paths and sort
-    file_tree_lines = [
-        f.relative_to(project_root).as_posix() for f in all_files
-    ]
-    file_tree_lines.sort()
-
-    logging.info("Found %d files to include in the archive.\n", len(file_tree_lines))
+    logging.info(
+        "Found %d files to include in the archive.\n",
+        tree_stats["included_files"],
+    )
 
     try:
         with open(output_filepath, "w", encoding="utf-8", errors="replace") as outfile:
@@ -231,45 +325,49 @@ def combine_project_files(  # noqa: C901 - high complexity due to multiple neste
                 "with each file wrapped in tags indicating its relative path.\n\n"
             )
 
-            # Write file tree at the beginning
-            outfile.write("--- Full Project Source File List ---\n")
-            outfile.write(f"Total files: {len(file_tree_lines)}\n\n")
-            for line in file_tree_lines:
+            # Write tree summary at the beginning.
+            outfile.write("--- Full Project Source Tree ---\n")
+            outfile.write(
+                "Legend: [include] exported in the content section; "
+                "[exclude] not exported in the content section.\n"
+            )
+            outfile.write(
+                "Excluded directories are shown only at the first excluded "
+                "node and their children are not expanded.\n"
+            )
+            outfile.write(
+                f"Included files: {tree_stats['included_files']}\n"
+                f"Excluded files: {tree_stats['excluded_files']}\n"
+                f"Excluded directories (collapsed): "
+                f"{tree_stats['excluded_directories']}\n\n"
+            )
+            for line in tree_lines:
                 outfile.write(line + "\n")
-            outfile.write("\n--- End of File List ---\n\n")
+            outfile.write("\n--- End of Tree ---\n\n")
 
             for dirpath, dirnames, filenames in os.walk(project_root, topdown=True):
                 current_path = Path(dirpath)
-
-                # We filter 'dirnames' in-place
-                # to prevent os.walk from recursing into them.
-                original_dirs = list(dirnames)  # Make a copy to iterate over
-                dirnames.clear()  # Clear the original list to rebuild it
-
-                for d in original_dirs:
-                    # Rule 1: Exclude if the directory name should be excluded anywhere.
-                    if d in EXCLUDE_DIRS_ANYWHERE:
-                        continue
-                    # Rule 2: Exclude if it's a root-only-exclusion
-                    # and we are at the root.
-                    if d in EXCLUDE_DIRS_ROOT_ONLY and current_path == project_root:
-                        continue
-                    # Rule 3: Exclude if the directory name matches a pattern.
-                    if any(d.endswith(p) for p in EXCLUDE_DIR_PATTERNS):
-                        continue
-                    # If all checks pass, add the directory back to be traversed.
-                    dirnames.append(d)
-
-                dirnames.sort()
+                dirnames[:] = filter_walk_directories(
+                    list(dirnames), current_path, project_root
+                )
 
                 # --- FILE PROCESSING LOGIC ---
                 for filename in sorted(filenames):
-                    if filename in exclude_files:
-                        continue
-
                     filepath = current_path / filename
                     relative_path_str = filepath.relative_to(project_root).as_posix()
                     content: Optional[str] = None
+                    include_in_archive, reason = get_archive_file_status(
+                        filepath, exclude_files
+                    )
+
+                    if not include_in_archive:
+                        logging.info(
+                            "  - Skipping excluded file: %s (%s)",
+                            relative_path_str,
+                            reason,
+                        )
+                        files_skipped_count += 1
+                        continue
 
                     try:
                         # Step 1: Specifically handle Jupyter Notebooks.
@@ -287,7 +385,8 @@ def combine_project_files(  # noqa: C901 - high complexity due to multiple neste
                                 filepath, "r", encoding="utf-8", errors="replace"
                             ) as infile:
                                 content = infile.read()
-                        # Step 3: If neither, skip the file.
+                        # Step 3: The inclusion classifier should have filtered
+                        # everything else already, but keep a safe fallback.
                         else:
                             logging.info(
                                 "  - Skipping binary/excluded file: %s",
