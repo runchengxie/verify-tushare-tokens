@@ -1,6 +1,5 @@
 """
 Internal maintainer helper for exporting repository source into one text file.
-Keep it as a local maintenance utility.
 """
 
 import argparse
@@ -12,10 +11,12 @@ from typing import List, Optional, Set
 
 # --- CONFIGURATION ---
 def _find_project_root(start: Path) -> Path:
-    for parent in [start, *start.parents]:
-        if (parent / "pyproject.toml").exists():
+    current = start if start.is_dir() else start.parent
+
+    for parent in [current, *current.parents]:
+        if (parent / "pyproject.toml").exists() or (parent / ".git").exists():
             return parent
-    return start
+    return current
 
 
 try:
@@ -60,6 +61,8 @@ EXCLUDE_DIRS_ROOT_ONLY: Set[str] = {
     "__pycache__/",
     "artifacts",
     "configs",
+    ".github",
+    ".githooks",
 }
 
 # Directory name patterns to exclude (e.g., any directory ending with .egg-info).
@@ -109,6 +112,11 @@ EXCLUDE_FILES: Set[str] = {
 }
 
 
+def is_config_metadata_text_file(filepath: Path) -> bool:
+    """Returns True for tracked config metadata that should ship with source."""
+    return filepath.suffix.lower() == ".csv" and "configs" in filepath.parts
+
+
 def process_notebook(filepath: Path) -> Optional[str]:
     """
     Parses a Jupyter Notebook (.ipynb) file, extracting only the code and
@@ -149,6 +157,8 @@ def is_likely_text_file(filepath: Path) -> bool:
     Checks if a file is likely to be a text file by checking its extension
     and sniffing the first 1024 bytes for null characters.
     """
+    if is_config_metadata_text_file(filepath):
+        return True
     if filepath.suffix.lower() in EXCLUDE_EXTENSIONS:
         return False
     try:
@@ -183,6 +193,8 @@ def get_archive_file_status(
         return False, "explicitly excluded filename"
     if filepath.suffix.lower() == ".ipynb":
         return True, "notebook"
+    if is_config_metadata_text_file(filepath):
+        return True, "config metadata text file"
     if filepath.suffix.lower() in EXCLUDE_EXTENSIONS:
         return False, "excluded extension"
     if is_likely_text_file(filepath):
