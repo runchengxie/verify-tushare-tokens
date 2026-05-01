@@ -61,7 +61,7 @@ load_exclude_file() {
     [[ "$line" =~ ^[[:space:]]*$ ]] && continue
     [[ "$line" =~ ^[[:space:]]*# ]] && continue
     EXCLUDES+=("$line")
-  done < "$exclude_file"
+  done <"$exclude_file"
 }
 
 checksum_file() {
@@ -76,9 +76,9 @@ checksum_file() {
   checksum_name="$(basename "$checksum_path")"
 
   if command -v sha256sum >/dev/null 2>&1; then
-    (cd "$archive_dir" && sha256sum "$archive_name" > "$checksum_name")
+    (cd "$archive_dir" && sha256sum "$archive_name" >"$checksum_name")
   elif command -v shasum >/dev/null 2>&1; then
-    (cd "$archive_dir" && shasum -a 256 "$archive_name" > "$checksum_name")
+    (cd "$archive_dir" && shasum -a 256 "$archive_name" >"$checksum_name")
   else
     die "No SHA-256 checksum tool found (need sha256sum or shasum)"
   fi
@@ -86,7 +86,7 @@ checksum_file() {
 
 file_size_bytes() {
   local file_path="$1"
-  wc -c < "$file_path" | tr -d '[:space:]'
+  wc -c <"$file_path" | tr -d '[:space:]'
 }
 
 parse_size_to_bytes() {
@@ -103,15 +103,15 @@ parse_size_to_bytes() {
   unit="${BASH_REMATCH[2]}"
 
   case "$unit" in
-    ""|b) factor=1 ;;
-    k|kb|kib) factor=$((1024)) ;;
-    m|mb|mib) factor=$((1024 * 1024)) ;;
-    g|gb|gib) factor=$((1024 * 1024 * 1024)) ;;
-    t|tb|tib) factor=$((1024 * 1024 * 1024 * 1024)) ;;
-    *) die "Unsupported split size suffix: $raw_size" ;;
+  "" | b) factor=1 ;;
+  k | kb | kib) factor=$((1024)) ;;
+  m | mb | mib) factor=$((1024 * 1024)) ;;
+  g | gb | gib) factor=$((1024 * 1024 * 1024)) ;;
+  t | tb | tib) factor=$((1024 * 1024 * 1024 * 1024)) ;;
+  *) die "Unsupported split size suffix: $raw_size" ;;
   esac
 
-  (( number > 0 )) || die "Split size must be greater than zero"
+  ((number > 0)) || die "Split size must be greater than zero"
   printf '%s\n' "$((number * factor))"
 }
 
@@ -206,7 +206,7 @@ write_split_manifest() {
     echo "Verify:"
     echo "  Use ${archive_name}.sha256 to verify the reassembled archive."
     echo "  Each part also has its own .sha256 file."
-  } > "$manifest_path"
+  } >"$manifest_path"
 }
 
 run_cmd() {
@@ -238,7 +238,7 @@ create_tar_gz() {
         tar_stream_args+=(--exclude "$pattern")
       done
       tar_stream_args+=(.)
-      tar "${tar_stream_args[@]}" | pv | gzip > "$archive_path"
+      tar "${tar_stream_args[@]}" | pv | gzip >"$archive_path"
     else
       tar "${tar_args[@]/-czf/-czvf}"
     fi
@@ -330,8 +330,8 @@ create_tar_zst() {
   die "tar.zst requires tar with --zstd support or a zstd binary"
 }
 
-# Project root: grandparent directory of this script
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# Project root: parent directory of this script directory
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CALLER_PWD="$PWD"
 
 DEFAULT_NAME="$(basename "$ROOT")"
@@ -368,76 +368,76 @@ SPLIT_PARTS=()
 POSITIONAL_INDEX=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --name)
-      require_value "$1" "${2-}"
-      NAME="$2"
-      shift 2
-      ;;
-    --out-dir)
-      require_value "$1" "${2-}"
-      OUT_DIR="$2"
-      shift 2
-      ;;
-    --format)
-      require_value "$1" "${2-}"
-      FORMAT="$2"
-      shift 2
-      ;;
-    --exclude-from)
-      require_value "$1" "${2-}"
-      EXCLUDE_FILES+=("$2")
-      shift 2
-      ;;
-    --no-default-excludes)
-      USE_DEFAULT_EXCLUDES=false
-      shift
-      ;;
-    --split-size)
-      require_value "$1" "${2-}"
-      SPLIT_SIZE="$2"
-      shift 2
-      ;;
-    --keep-archive)
-      KEEP_ARCHIVE=true
-      shift
-      ;;
-    --work-dir)
-      require_value "$1" "${2-}"
-      WORK_DIR_BASE="$2"
-      shift 2
-      ;;
-    --progress)
-      PROGRESS=true
-      shift
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    --)
-      shift
-      while [[ $# -gt 0 ]]; do
-        case "$POSITIONAL_INDEX" in
-          0) NAME="$1" ;;
-          1) OUT_DIR="$1" ;;
-          *) die "Too many positional arguments" ;;
-        esac
-        POSITIONAL_INDEX=$((POSITIONAL_INDEX + 1))
-        shift
-      done
-      ;;
-    -*)
-      die "Unknown argument: $1"
-      ;;
-    *)
+  --name)
+    require_value "$1" "${2-}"
+    NAME="$2"
+    shift 2
+    ;;
+  --out-dir)
+    require_value "$1" "${2-}"
+    OUT_DIR="$2"
+    shift 2
+    ;;
+  --format)
+    require_value "$1" "${2-}"
+    FORMAT="$2"
+    shift 2
+    ;;
+  --exclude-from)
+    require_value "$1" "${2-}"
+    EXCLUDE_FILES+=("$2")
+    shift 2
+    ;;
+  --no-default-excludes)
+    USE_DEFAULT_EXCLUDES=false
+    shift
+    ;;
+  --split-size)
+    require_value "$1" "${2-}"
+    SPLIT_SIZE="$2"
+    shift 2
+    ;;
+  --keep-archive)
+    KEEP_ARCHIVE=true
+    shift
+    ;;
+  --work-dir)
+    require_value "$1" "${2-}"
+    WORK_DIR_BASE="$2"
+    shift 2
+    ;;
+  --progress)
+    PROGRESS=true
+    shift
+    ;;
+  -h | --help)
+    usage
+    exit 0
+    ;;
+  --)
+    shift
+    while [[ $# -gt 0 ]]; do
       case "$POSITIONAL_INDEX" in
-        0) NAME="$1" ;;
-        1) OUT_DIR="$1" ;;
-        *) die "Too many positional arguments" ;;
+      0) NAME="$1" ;;
+      1) OUT_DIR="$1" ;;
+      *) die "Too many positional arguments" ;;
       esac
       POSITIONAL_INDEX=$((POSITIONAL_INDEX + 1))
       shift
-      ;;
+    done
+    ;;
+  -*)
+    die "Unknown argument: $1"
+    ;;
+  *)
+    case "$POSITIONAL_INDEX" in
+    0) NAME="$1" ;;
+    1) OUT_DIR="$1" ;;
+    *) die "Too many positional arguments" ;;
+    esac
+    POSITIONAL_INDEX=$((POSITIONAL_INDEX + 1))
+    shift
+    ;;
   esac
 done
 
@@ -445,10 +445,10 @@ done
 [[ "$NAME" != */* ]] || die "Archive name must not contain path separators"
 
 case "$FORMAT" in
-  tar.gz) EXTENSION="tar.gz" ;;
-  zip) EXTENSION="zip" ;;
-  tar.zst) EXTENSION="tar.zst" ;;
-  *) die "Unsupported format: $FORMAT (expected tar.gz, zip, or tar.zst)" ;;
+tar.gz) EXTENSION="tar.gz" ;;
+zip) EXTENSION="zip" ;;
+tar.zst) EXTENSION="tar.zst" ;;
+*) die "Unsupported format: $FORMAT (expected tar.gz, zip, or tar.zst)" ;;
 esac
 
 if [[ -n "$SPLIT_SIZE" ]]; then
@@ -495,9 +495,9 @@ FINAL_ARCHIVE_PATH="${OUT_DIR}/${ARCHIVE_BASENAME}"
 cd "$ROOT"
 
 case "$FORMAT" in
-  tar.gz) create_tar_gz "$ARCHIVE_PATH" ;;
-  zip) create_zip "$ARCHIVE_PATH" ;;
-  tar.zst) create_tar_zst "$ARCHIVE_PATH" ;;
+tar.gz) create_tar_gz "$ARCHIVE_PATH" ;;
+zip) create_zip "$ARCHIVE_PATH" ;;
+tar.zst) create_tar_zst "$ARCHIVE_PATH" ;;
 esac
 
 checksum_file "$ARCHIVE_PATH"
