@@ -10,16 +10,19 @@ usage() {
   cat <<EOF
 Usage:
   $(basename "$0") [NAME] [OUT_DIR]
-  $(basename "$0") [--name NAME] [--out-dir DIR] [--format tar.gz|zip|tar.zst]
+  $(basename "$0") [--name NAME] [--out-dir DIR] [--format tar|tar.gz|zip|tar.zst]
                    [--exclude-from FILE]... [--no-default-excludes]
-                   [--split-size SIZE] [--keep-archive] [--work-dir DIR] [--progress]
+                   [--source-only] [--split-size SIZE] [--keep-archive]
+                   [--work-dir DIR] [--progress]
 
 Options:
   --name NAME            Archive base name (default: project directory name)
   --out-dir DIR          Output directory (default: parent of project root)
-  --format FORMAT        Archive format: tar.gz | zip | tar.zst (default: tar.gz)
+  --format FORMAT        Archive format: tar | tar.gz | zip | tar.zst (default: tar)
   --exclude-from FILE    Read additional exclude patterns from FILE; can be repeated
   --no-default-excludes  Disable built-in exclude patterns
+  --source-only          Exclude runtime data directories for a source-only archive
+  --exclude-runtime      Alias for --source-only
   --split-size SIZE      Split archive into SIZE chunks (for example: 950m, 1g)
   --keep-archive         Keep the full archive alongside split parts
   --work-dir DIR         Temporary work directory base (default: OUT_DIR)
@@ -217,6 +220,27 @@ run_cmd() {
   fi
 }
 
+create_tar() {
+  local archive_path="$1"
+  local tar_args
+  local pattern
+
+  command -v tar >/dev/null 2>&1 || die "tar not found"
+
+  tar_args=(-cf "$archive_path")
+  for pattern in "${EXCLUDES[@]}"; do
+    tar_args+=(--exclude "$pattern")
+  done
+  tar_args+=(.)
+
+  if [[ "$PROGRESS" == true ]]; then
+    tar "${tar_args[@]/-cf/-cvf}"
+  else
+    tar "${tar_args[@]}"
+  fi
+  tar -tf "$archive_path" >/dev/null
+}
+
 create_tar_gz() {
   local archive_path="$1"
   local tar_args
@@ -336,11 +360,12 @@ CALLER_PWD="$PWD"
 
 DEFAULT_NAME="$(basename "$ROOT")"
 DEFAULT_OUT_DIR="$ROOT/.."
-DEFAULT_FORMAT="tar.gz"
+DEFAULT_FORMAT="tar"
 
 DEFAULT_EXCLUDES=(
   "__pycache__"
   ".pytest_cache"
+  ".ruff_cache"
   "*.pyc"
   "*.pyo"
   "*.pyd"
@@ -348,13 +373,23 @@ DEFAULT_EXCLUDES=(
   "htmlcov"
   ".venv"
   ".git"
+  "build"
+  "dist"
+  "*.egg-info"
   "full_project_source.txt"
+)
+
+RUNTIME_EXCLUDES=(
+  "artifacts"
+  "cache"
+  "data"
 )
 
 NAME="$DEFAULT_NAME"
 OUT_DIR="$DEFAULT_OUT_DIR"
 FORMAT="$DEFAULT_FORMAT"
 USE_DEFAULT_EXCLUDES=true
+EXCLUDE_RUNTIME=false
 PROGRESS=false
 SPLIT_SIZE=""
 SPLIT_SIZE_BYTES=""
@@ -390,6 +425,10 @@ while [[ $# -gt 0 ]]; do
     ;;
   --no-default-excludes)
     USE_DEFAULT_EXCLUDES=false
+    shift
+    ;;
+  --source-only | --exclude-runtime)
+    EXCLUDE_RUNTIME=true
     shift
     ;;
   --split-size)
@@ -445,10 +484,11 @@ done
 [[ "$NAME" != */* ]] || die "Archive name must not contain path separators"
 
 case "$FORMAT" in
+tar) EXTENSION="tar" ;;
 tar.gz) EXTENSION="tar.gz" ;;
 zip) EXTENSION="zip" ;;
 tar.zst) EXTENSION="tar.zst" ;;
-*) die "Unsupported format: $FORMAT (expected tar.gz, zip, or tar.zst)" ;;
+*) die "Unsupported format: $FORMAT (expected tar, tar.gz, zip, or tar.zst)" ;;
 esac
 
 if [[ -n "$SPLIT_SIZE" ]]; then
@@ -477,6 +517,10 @@ if [[ "$USE_DEFAULT_EXCLUDES" == true ]]; then
   EXCLUDES=("${DEFAULT_EXCLUDES[@]}")
 fi
 
+if [[ "$EXCLUDE_RUNTIME" == true ]]; then
+  EXCLUDES+=("${RUNTIME_EXCLUDES[@]}")
+fi
+
 if [[ ${#EXCLUDE_FILES[@]} -gt 0 ]]; then
   for exclude_file in "${EXCLUDE_FILES[@]}"; do
     exclude_file="$(resolve_path_arg "$exclude_file")"
@@ -495,6 +539,7 @@ FINAL_ARCHIVE_PATH="${OUT_DIR}/${ARCHIVE_BASENAME}"
 cd "$ROOT"
 
 case "$FORMAT" in
+tar) create_tar "$ARCHIVE_PATH" ;;
 tar.gz) create_tar_gz "$ARCHIVE_PATH" ;;
 zip) create_zip "$ARCHIVE_PATH" ;;
 tar.zst) create_tar_zst "$ARCHIVE_PATH" ;;
